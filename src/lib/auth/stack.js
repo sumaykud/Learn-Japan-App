@@ -6,6 +6,19 @@ const publishableClientKey = import.meta.env.VITE_STACK_PUBLISHABLE_CLIENT_KEY;
 
 export const authConfigured = Boolean(projectId && publishableClientKey);
 
+// Having one Stack value but not the other is always a mistake, and it fails
+// silently: authConfigured goes false and the app drops back to guest mode with
+// no landing page, no accounts and no admin — looking like the feature was
+// never built rather than like a missing variable. Common cause is setting the
+// two keys to different Vercel environments.
+if (!authConfigured && (projectId || publishableClientKey)) {
+  const missing = projectId ? "VITE_STACK_PUBLISHABLE_CLIENT_KEY" : "VITE_STACK_PROJECT_ID";
+  console.warn(
+    `[learn-japan] Accounts are switched OFF because ${missing} is missing from this build. ` +
+      "All three VITE_ values must be present in the same environment — see .env.example."
+  );
+}
+
 let appPromise = null;
 
 // The Stack SDK is around 500 kB of JavaScript — more than the entire rest of
