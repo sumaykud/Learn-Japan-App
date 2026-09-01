@@ -527,6 +527,12 @@ There is no test runner yet. What is currently checked, and how:
   functions) plus a live probe with a real JWT: a signed-in *pending* user must
   get 403 on `PATCH /profiles {role}`, 403 on writing `srs_cards`, and
   `400 "admin privileges required"` from every `/rpc/admin_*`.
+- **Deploy config** — `npm run check:vercel` parses `vercel.json` and validates
+  it against Vercel's published schema. It runs as part of `npm run build`,
+  because Vercel rejects a malformed file *before* the build starts: the error
+  is "Invalid vercel.json file provided" with no build logs behind it. The
+  first version of that file contained `\.` inside a regex, which is not a
+  legal JSON escape, so it never parsed at all.
 
   The live half is not optional. A stale Data API schema cache answers 404 to
   every RPC, which looks like a refusal but proves nothing — see §8.6.

@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "source": "/((?!assets/|audio/|favicon|.*\.[a-zA-Z0-9]+$).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]

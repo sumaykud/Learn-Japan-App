@@ -27,10 +27,11 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/check_vercel_json.mjs && vite build",
     "preview": "vite preview",
     "audio:manifest": "node scripts/build_audio_manifest.mjs",
-    "deploy": "npm run build && gh-pages -d dist"
+    "deploy": "npm run build && gh-pages -d dist",
+    "check:vercel": "node scripts/check_vercel_json.mjs"
   },
   "dependencies": {
     "@stackframe/js": "^2.8.108",
