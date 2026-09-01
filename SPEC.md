@@ -1,6 +1,6 @@
 # Learn Japan App — Technical Specification
 
-Version 0.3.0 · last revised 2026-09-01
+Version 0.4.0 · last revised 2026-09-01
 
 This document describes how the app is built and, more importantly, the
 invariants a contributor must not break. The README explains what the app does;
@@ -423,7 +423,42 @@ about your access rules. Re-run the checks after reloading, and only trust a
 
 ---
 
-## 9. Screens
+## 9. Routing and screens
+
+### 9.1 Routes
+
+Two entrances, resolved in `src/lib/router.js` — about forty lines of
+`history.pushState` and a `popstate` listener. A router library would be more
+code than the two routes it served.
+
+| Route | Signed out | Pending / suspended | Learner | Admin |
+| --- | --- | --- | --- | --- |
+| `/` | `LandingPage` | `GateScreen` | learner shell | redirect → `/admin` |
+| `/admin` | `AdminLogin` | `GateScreen` | `GateScreen` no-access | `AdminConsole` |
+
+Resolution order in `App` is identity → authorisation → role → route. Getting
+that order wrong cannot leak data, because the database refuses the admin RPCs
+regardless of what is rendered, but it can show someone a confusing screen.
+
+**The route is not a security boundary.** `/admin` is a convenience: a
+bookmarkable front door for a different audience. Anyone may open it.
+
+### 9.2 Two failure modes worth knowing
+
+**Sign-in is a handshake across two services.** Stack Auth writes the session
+cookie; only then does a token carrying `sub` exist for Postgres. Asking for the
+profile the instant `status` flips can land in that gap, and `ensure_profile()`
+answers `not authenticated` — transient, not a permission failure. `useProfile`
+retries on a short backoff rather than showing an error screen for a race the
+learner cannot act on.
+
+**A partial environment fails differently at each level.** One `VITE_STACK_*`
+value missing switches accounts off entirely and silently (a console warning is
+the only signal). `VITE_NEON_DATA_API_URL` missing lets sign-in succeed and then
+has nowhere to read the profile from — that one names the missing variable on
+screen, because it used to hang on a splash forever.
+
+### 9.3 Screens
 
 | Tab | Reads | Writes |
 | --- | --- | --- |
@@ -462,9 +497,11 @@ a study tool that must work offline.
 Vite 5, React 18, `lucide-react` for icons. No CSS framework, no state library,
 no router — the tab state is a single `useState`.
 
-`base: "./"` in `vite.config.js` makes the build path-independent, so it works
-from a GitHub Pages project subpath without configuration. This is only safe
-because the app has no client-side routing.
+`base` is `/`, not `./`. It was relative while the app had no routes; once
+`/admin` existed, a relative base made its assets resolve to `/admin/assets/…`
+and 404. The consequence is that the host must serve `index.html` for unknown
+paths — `vercel.json` does this, and a GitHub Pages project site now needs both
+a matching `base` and a `404.html` fallback.
 
 ```bash
 npm run dev              # localhost:5173

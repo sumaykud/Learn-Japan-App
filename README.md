@@ -129,6 +129,21 @@ bundle you can host anywhere.
 > Saving the Data API settings in the Neon console does. Repeat after any
 > migration that touches a function.
 
+### Two entrances
+
+| URL | Signed out | Learner | Administrator |
+| --- | --- | --- | --- |
+| `/` | Landing page with sign in / create account | The learning dashboard | Redirected to `/admin` |
+| `/admin` | Administrator sign-in | "Not an administrator" | The admin console |
+
+An administrator has no learner interface, so `/` has nothing to show them and
+sends them on. A learner who opens `/admin` is told plainly rather than silently
+bounced, which would look like a broken link.
+
+**The URL protects nothing.** Anyone may open `/admin`; what stops them is that
+the admin functions refuse a caller who is not an admin. The split exists so the
+two audiences get the right front door, not as a security boundary.
+
 ### What the administrator can do
 
 An admin account has **no learning interface at all** — the role exists to
@@ -273,11 +288,32 @@ Include the level, the entry, and what it should be.
 ```bash
 npm run build     # → dist/
 npm run preview   # serve the production build locally
-npm run deploy    # publish dist/ to the gh-pages branch
 ```
 
-Then set **Settings → Pages → Source** to the `gh-pages` branch. The Vite base
-is `./`, so the app works from a project subpath with no extra configuration.
+### Vercel
+
+Import the repository, keep the detected Vite preset, and add the three `VITE_`
+values from `.env.example` — to **Production, Preview and Development alike**.
+Splitting them across environments leaves production with a partial config; the
+app then falls back to guest mode or stops at an error naming what is missing.
+
+`vercel.json` already rewrites unknown paths to `index.html`, which is what lets
+someone refresh on `/admin` instead of getting a 404.
+
+### Anywhere else
+
+The app is static files. Two requirements:
+
+1. **Serve `index.html` for unknown paths.** Without it `/admin` 404s on
+   refresh.
+2. **Serve from the root**, or set Vite's `base` to your sub-path. `base` is
+   `/` rather than `./` because a relative base makes assets under `/admin`
+   resolve to `/admin/assets/…`. The router reads `import.meta.env.BASE_URL`, so
+   a sub-path works once `base` matches it.
+
+> GitHub Pages project sites need both: set `base` to `"/<repo-name>/"` and add
+> the usual `404.html` copy of `index.html` for the SPA fallback. This used to
+> work with no configuration, before `/admin` existed.
 
 A full set of VOICEVOX clips is a few hundred WAV files. If repository size
 matters, either leave `public/audio/` out of version control and let the browser

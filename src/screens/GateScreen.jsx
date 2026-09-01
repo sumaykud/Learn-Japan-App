@@ -17,6 +17,12 @@ const VARIANTS = {
     title: "Account suspended",
     body: "An administrator has suspended this account. Your study history is kept and will return if the account is reinstated.",
   },
+  "no-access": {
+    icon: Ban,
+    tone: "var(--muted)",
+    title: "Not an administrator",
+    body: "This account is a learner, so the administration area is not available to it. Your study dashboard is where you left it.",
+  },
   error: {
     icon: TriangleAlert,
     tone: "var(--vermillion)",
@@ -28,7 +34,7 @@ const VARIANTS = {
   },
 };
 
-export default function GateScreen({ variant = "pending", detail, onRetry }) {
+export default function GateScreen({ variant = "pending", detail, onRetry, primary }) {
   const { user, signOut } = useAuth();
   const v = VARIANTS[variant] || VARIANTS.pending;
 
@@ -50,9 +56,15 @@ export default function GateScreen({ variant = "pending", detail, onRetry }) {
         {detail && <p className="form-error" style={{ justifyContent: "center" }}>{detail}</p>}
 
         <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
-          <button className="btn primary" onClick={onRetry}>
-            <RefreshCw size={14} /> Check again
-          </button>
+          {primary ? (
+            <button className="btn primary" onClick={primary.onClick}>
+              {primary.label}
+            </button>
+          ) : (
+            <button className="btn primary" onClick={onRetry}>
+              <RefreshCw size={14} /> Check again
+            </button>
+          )}
           <button className="btn" onClick={signOut}>
             <LogOut size={14} /> Sign out
           </button>

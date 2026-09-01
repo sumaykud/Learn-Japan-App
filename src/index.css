@@ -1376,3 +1376,38 @@ code {
   font-size: 12.5px;
   gap: 5px;
 }
+
+/* ---------- admin login ---------- */
+
+.admin-login .auth-card {
+  max-width: 420px;
+  width: 100%;
+  text-align: left;
+}
+
+.admin-login-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.admin-login-head h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--vermillion);
+}
+
+.admin-login-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--vermillion-soft);
+  color: var(--vermillion);
+  flex-shrink: 0;
+}
