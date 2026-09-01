@@ -11,9 +11,22 @@ export function useProfile(status, getToken) {
   const [error, setError] = useState(null);
 
   const reload = useCallback(async () => {
-    if (status !== "signed-in" || !syncConfigured) {
+    if (status !== "signed-in") {
       setProfile(null);
       setState("idle");
+      return;
+    }
+
+    // Half-configured deployment: Stack Auth is set but the Data API is not,
+    // so sign-in works and then there is nowhere to read the profile from.
+    // Without this branch the app sits on "Loading your account…" forever,
+    // which hides the actual cause. Say what is missing instead.
+    if (!syncConfigured) {
+      setProfile(null);
+      setError(
+        "VITE_NEON_DATA_API_URL is not set for this build. Accounts need all three VITE_ values — see .env.example."
+      );
+      setState("error");
       return;
     }
     setState("loading");

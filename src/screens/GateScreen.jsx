@@ -21,7 +21,10 @@ const VARIANTS = {
     icon: TriangleAlert,
     tone: "var(--vermillion)",
     title: "Could not load your account",
-    body: "We reached the server but could not read your profile. This is usually temporary.",
+    // Deliberately does not claim this is temporary: the most common cause is a
+    // half-configured deployment, and telling someone to wait it out would send
+    // them looking in the wrong place.
+    body: "Your profile could not be read. The detail below says why.",
   },
 };
 
