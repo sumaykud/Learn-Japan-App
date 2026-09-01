@@ -7,9 +7,11 @@
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-40704f.svg)](#contributing)
 
 Free, open source, and free of the things that usually come attached: no
-account, no server, no tracking, no streak guilt-tripping, no paywall on the
-useful half. Everything runs in your browser and your progress stays in your
-browser.
+tracking, no streak guilt-tripping, no paywall on the useful half.
+
+Clone it and it runs entirely in your browser with nothing to configure. Point
+it at a Neon database and it grows accounts, admin approval and cross-device
+sync — still with no backend of your own to run.
 
 Dialogues, grammar, spaced-repetition vocabulary and sentence building — 358
 words, 78 grammar patterns, 18 full dialogues and 321 practice sentences, all
@@ -73,6 +75,99 @@ but never touch card intervals — a lucky multiple-choice guess should not push
 word you cannot produce three weeks into the future.
 
 Details in [`SPEC.md` §5](SPEC.md); the code is [`src/lib/srs.js`](src/lib/srs.js).
+
+## Accounts and sync (optional)
+
+Out of the box there are no accounts: progress lives in your browser and the app
+works offline. Adding three environment values turns on a second mode.
+
+| | Without `.env` | With `.env` |
+| --- | --- | --- |
+| Entry point | Straight into the app | Landing page, sign in required |
+| Progress | localStorage only | Postgres, synced across devices |
+| New accounts | — | Wait for an administrator to approve |
+| Roles | — | `user` studies · `admin` manages accounts |
+
+### How it fits together
+
+```
+browser ──JWT──► Neon Auth (Stack Auth)      issues and refreshes the token
+   │
+   └──REST──────► Neon Data API (PostgREST) ──► Postgres
+                                                 Row Level Security decides
+                                                 what that token may touch
+```
+
+There is no server of ours in the middle, which is why the app stays a static
+bundle you can host anywhere.
+
+### Setting it up
+
+1. Create a Neon project, then enable **Neon Auth** and the **Data API** on its
+   default branch.
+2. Apply the migrations in order:
+   ```bash
+   psql "$DATABASE_URL" -f db/migrations/001_init.sql
+   ```
+   ```bash
+   psql "$DATABASE_URL" -f db/migrations/002_roles_and_approval.sql
+   ```
+3. Put your own email in `public.admin_allowlist` so your account becomes the
+   first administrator when you sign up:
+   ```sql
+   insert into public.admin_allowlist (email) values ('you@example.com');
+   ```
+4. Copy `.env.example` to `.env` and fill in the three values.
+5. **Reload the Data API schema cache** — see the warning below.
+6. `npm run dev`
+
+> **The one thing that will trip you up.** Neon's Data API caches the Postgres
+> schema and does *not* pick up new functions on its own. Until you reload it,
+> every `/rpc/` call answers `404 "Could not find the function ... in the schema
+> cache"` — which reads like a permissions error but is not one. `NOTIFY pgrst,
+> 'reload schema'` will not do it, and neither will restarting the compute.
+> Saving the Data API settings in the Neon console does. Repeat after any
+> migration that touches a function.
+
+### What the administrator can do
+
+An admin account has **no learning interface at all** — the role exists to
+manage accounts, not to study. The console lists every account with its status
+and study volume, and can approve, suspend, promote, demote, wipe one learner's
+progress, or wipe everyone's.
+
+Admins cannot change their own role or status. Locking yourself out would leave
+nobody able to unlock you, so the database refuses it.
+
+### Verifying the access rules
+
+The security model lives in Postgres, so it can be checked there:
+
+```bash
+psql "$DATABASE_URL" -f db/checks.sql
+```
+
+Seven assertions covering grants, RLS and the admin functions; all should say
+PASS. That does **not** cover the live API, so also confirm with a real token
+that a signed-in *pending* user gets:
+
+- `403` on `PATCH /profiles` with `{"role":"admin"}` — no self-promotion
+- `403` on writing `srs_cards` — no studying before approval
+- `400 "admin privileges required"` from every `/rpc/admin_*`
+
+A `404` from an `/rpc/` endpoint means a stale schema cache, not a refusal.
+Reload it and test again before believing the rules hold.
+
+### Why it is built this way
+
+Because the browser talks to Postgres directly, **anything the `authenticated`
+role may do, a user can do with curl**. The UI is not a security boundary.
+
+So `role` and `status` are revoked from that role at the column level — a grant
+sits underneath RLS, and no future policy can hand back what the grant
+withholds. Every privileged action is a `SECURITY DEFINER` function that
+re-checks admin membership itself. `db/migrations/002_roles_and_approval.sql`
+opens with the full reasoning; [`SPEC.md` §8](SPEC.md) has the rest.
 
 ## Natural-sounding audio (optional)
 
@@ -191,6 +286,9 @@ voice handle playback, or compress the clips before committing.
 ## Project layout
 
 ```
+db/
+  migrations/    001 schema + RLS · 002 roles, approval, admin functions
+  checks.sql     assertions the access rules must satisfy
 src/
   data/          n5.js n4.js n3.js n2.js — all content
                  kana.js   — syllabary tables (katakana derived from hiragana)
@@ -200,8 +298,10 @@ src/
                  audio.js     clip playback with browser-voice fallback
                  hash.js      content-addressed audio keys
                  storage.js   namespaced localStorage
+  lib/auth/      Stack Auth client (lazy-loaded), session and profile hooks
+  lib/sync/      Data API wrapper, merge rules, admin RPCs
   components/    Japanese.jsx (ruby + speak button), ui.jsx (shared atoms)
-  screens/       one file per tab
+  screens/       one file per tab, plus landing, gate and admin console
 scripts/
   build_audio_manifest.mjs   regenerates audio_manifest.json from src/data
   voicevox_batch_synth.py    renders the manifest into public/audio/
@@ -213,7 +313,10 @@ and the invariants in full.
 ## Tech
 
 React 18 · Vite 5 · `lucide-react` for icons. No CSS framework, no state
-library, no router, no backend. Bundle is ~90 kB gzipped.
+library, no router, no backend of our own.
+
+The learner bundle is ~99 kB gzipped. The Stack Auth SDK is another ~129 kB and
+loads dynamically, so a build with no accounts configured never fetches it.
 
 ## Licence
 

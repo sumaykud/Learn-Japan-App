@@ -19,12 +19,15 @@ const MINUTE = 60 * 1000;
 const DAY = 24 * 60 * MINUTE;
 
 export function newCard(now = Date.now()) {
-  return { ease: 2.5, interval: 0, reps: 0, lapses: 0, due: now, seen: 0 };
+  return { ease: 2.5, interval: 0, reps: 0, lapses: 0, due: now, seen: 0, updatedAt: now };
 }
 
 export function review(card, grade, now = Date.now()) {
   const c = card ? { ...card } : newCard(now);
   c.seen = (c.seen || 0) + 1;
+  // Stamped on every grading so two devices that studied the same card offline
+  // can be merged by recency rather than by whichever synced last.
+  c.updatedAt = now;
 
   if (grade === AGAIN) {
     c.lapses = (c.lapses || 0) + 1;

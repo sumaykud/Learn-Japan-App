@@ -55,7 +55,7 @@ function Action({ icon: Icon, title, desc, onClick }) {
   );
 }
 
-export default function TodayScreen({ levels, cards, log, go, reset }) {
+export default function TodayScreen({ levels, cards, log, go, reset, sync }) {
   const scope = useMemo(() => byLevel(vocab, levels), [levels]);
   const c = useMemo(() => counts(scope, cards), [scope, cards]);
   const days = streak(log, Date.now());
@@ -126,7 +126,14 @@ export default function TodayScreen({ levels, cards, log, go, reset }) {
       </div>
 
       <div>
-        <SectionHead title="Your data" sub="Progress is stored in this browser only — nothing leaves your machine." />
+        <SectionHead
+          title="Your data"
+          sub={
+            sync && sync.status !== "local"
+              ? "Synced to your account — resetting clears it on every device you use."
+              : "Stored in this browser only — nothing leaves your machine."
+          }
+        />
         <button
           className="btn"
           onClick={() => {

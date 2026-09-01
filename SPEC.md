@@ -1,6 +1,6 @@
 # Learn Japan App — Technical Specification
 
-Version 0.2.0 · last revised 2026-09-01
+Version 0.3.0 · last revised 2026-09-01
 
 This document describes how the app is built and, more importantly, the
 invariants a contributor must not break. The README explains what the app does;
@@ -26,8 +26,11 @@ first-class treatment: the sentence builder and the EN → JP flashcard directio
 ### 1.3 Non-goals
 
 - **No handwriting or stroke-order practice.** Out of scope; other tools do it better.
-- **No server, accounts or sync.** Progress is per-browser. This is a deliberate
-  simplicity trade: it keeps the app deployable as static files anywhere.
+- ~~No server, accounts or sync.~~ **Superseded in 0.3.0.** Accounts, admin
+  approval and cross-device sync now exist — but without a backend of our own:
+  Neon Auth issues the tokens and the browser talks to Postgres through the
+  Neon Data API. The app is still a static bundle, deployable anywhere.
+  With no auth configured it degrades to the original local-only learner.
 - **No JLPT exam simulation.** Levels here organise difficulty; they are not a
   claim of exam coverage.
 - **No machine translation at runtime.** Every English gloss is hand-written.
@@ -302,24 +305,125 @@ terms before redistributing rendered clips.
 
 ## 7. Persistence
 
-`localStorage`, all keys prefixed `learn-japan:`. Every read and write is
+`localStorage`, all keys prefixed `learn-japan:` and **namespaced by scope** —
+`guest` or `u:<user id>`. Two accounts on one browser never see each other's
+progress, and signing out does not destroy what a guest built up.
+
+For a signed-in learner localStorage is a cache, not the record of truth:
+Postgres is. Writes land locally first and flush on a 1.5 s debounce. Every read and write is
 wrapped — a browser in private mode or with storage disabled degrades to
 in-memory state for the session rather than throwing.
 
 | Key | Shape |
 | --- | --- |
-| `learn-japan:cards` | `{ [cardId]: Card }` |
-| `learn-japan:log` | `{ "2026-09-01": { reviews: 12, correct: 9 } }` |
-| `learn-japan:levels` | `["N5", "N4"]` |
-| `learn-japan:furigana` | `"on" \| "off" \| "kana"` |
-| `learn-japan:theme` | `"light" \| "dark"` |
+| `learn-japan:<scope>:cards` | `{ [cardId]: Card }` |
+| `learn-japan:<scope>:log` | `{ "2026-09-01": { reviews: 12, correct: 9 } }` |
+| `learn-japan:<scope>:levels` | `["N5", "N4"]` |
+| `learn-japan:<scope>:furigana` | `"on" \| "off" \| "kana"` |
+| `learn-japan:<scope>:theme` | `"light" \| "dark"` |
 
 Day keys are **local calendar days**, not UTC — a streak should roll over at the
 learner's midnight.
 
 ---
 
-## 8. Screens
+## 8. Accounts, roles and access control
+
+Added in 0.3.0. Optional: with no `VITE_STACK_*` values the app has no accounts
+at all and none of this applies.
+
+### 8.1 Pieces
+
+| Piece | Job |
+| --- | --- |
+| **Neon Auth** (Stack Auth) | Issues and refreshes the JWT. Mirrors users into `neon_auth.users_sync`. |
+| **Neon Data API** (PostgREST) | Exposes Postgres over REST. Verifies the JWT and sets `auth.user_id()`. |
+| **Postgres RLS + grants** | The only thing enforcing who may read or write what. |
+
+There is **no backend of ours**. The browser holds a token and talks to Postgres
+directly, which is what keeps the app a static bundle.
+
+### 8.2 The consequence that shapes everything
+
+Anything the `authenticated` role is permitted to do, a user can do by hand with
+curl and their own token. The UI is not a security boundary — it is a
+convenience over an API that is fully exposed.
+
+Concretely: a policy of `for all using (user_id = auth.user_id())` on
+`profiles` would let anyone PATCH their own row with
+`{"role":"admin","status":"approved"}`. Admin approval would be theatre.
+
+### 8.3 How privilege is actually held
+
+Two mechanisms, deliberately layered:
+
+1. **Column-level grants.** `authenticated` may UPDATE only
+   `display_name, levels, furigana, theme`. `role` and `status` are not
+   granted, and INSERT/DELETE on `profiles` are revoked outright. A grant sits
+   *underneath* RLS: no policy can hand back what the grant withholds, so a
+   future careless policy cannot reopen this.
+2. **SECURITY DEFINER functions.** Every privileged action is an RPC that
+   re-checks `is_admin()` in its own body, with a pinned `search_path`.
+
+```
+ensure_profile()                    creates the profile; the SERVER picks role/status
+admin_list_accounts()               all accounts + per-account study counts
+admin_set_status(user, status)      approve / suspend
+admin_set_role(user, role)          promote / demote
+admin_reset_progress(user | null)   wipe one learner, or everyone
+admin_stats()                       counts for the console
+```
+
+A SECURITY DEFINER function runs as the table owner. **Omitting the `is_admin()`
+check in any one of them hands the whole table to every signed-in user** —
+`db/checks.sql` check 7 exists to catch exactly that.
+
+Both admin mutators refuse when `target_user = auth.user_id()`. An admin who
+suspended or demoted themselves would leave nobody able to undo it.
+
+### 8.4 States
+
+```
+signed out ──────────────────────────► landing page
+     │ create account
+     ▼
+status = pending ────────────────────► "waiting for approval"
+     │ admin approves                    (no study data reachable: RLS refuses)
+     ▼
+status = approved, role = user ──────► the learner app
+status = approved, role = admin ─────► the admin console, and nothing else
+status = suspended ──────────────────► "account suspended" (history retained)
+```
+
+An admin has no learner UI by design: the role exists to administer accounts,
+not to study. Study tables are gated on `is_approved()`, so a pending account
+cannot write a single card even by calling the API directly.
+
+### 8.5 Bootstrapping the first admin
+
+`public.admin_allowlist` holds emails that become approved admins on first
+sign-in. Without it a fresh deployment would have every account pending and
+nobody able to approve anything. The table has no grants to `authenticated`,
+so it is invisible and unwritable from the browser.
+
+### 8.6 Operational trap: the schema cache
+
+**Neon's Data API caches the Postgres schema and does not notice new
+functions.** Until it is reloaded, every `/rpc/` call answers `404 "Could not
+find the function ... in the schema cache"`, which reads like a permissions
+failure and is not one.
+
+`NOTIFY pgrst, 'reload schema'` does not reach it. Restarting the compute
+endpoint does not either. **Touching the Data API configuration does** — save
+its settings in the Neon console, or call `update_data_api`.
+
+This matters for verification as much as for deployment: a 404 proves nothing
+about your access rules. Re-run the checks after reloading, and only trust a
+`400 "admin privileges required"` as evidence the guard works.
+
+---
+
+## 9. Screens
 
 | Tab | Reads | Writes |
 | --- | --- | --- |
@@ -340,7 +444,7 @@ level change (via React `key`) so a half-finished round cannot mix scopes.
 
 ---
 
-## 9. Theming
+## 10. Theming
 
 CSS custom properties on `:root`, with `:root[data-theme="dark"]` overriding the
 token values only. No component hard-codes a colour; adding a third theme means
@@ -353,7 +457,7 @@ a study tool that must work offline.
 
 ---
 
-## 10. Build and deploy
+## 11. Build and deploy
 
 Vite 5, React 18, `lucide-react` for icons. No CSS framework, no state library,
 no router — the tab state is a single `useState`.
@@ -372,7 +476,7 @@ npm run deploy           # build + publish dist/ to the gh-pages branch
 
 ---
 
-## 11. Verification
+## 12. Verification
 
 There is no test runner yet. What is currently checked, and how:
 
@@ -382,12 +486,19 @@ There is no test runner yet. What is currently checked, and how:
 - **Scheduler** — direct calls to `review()` / `buildQueue()` under Node,
   including the lapse path.
 - **UI** — manual pass over every screen in both themes.
+- **Access rules** — `db/checks.sql` (7 assertions on grants, RLS and the admin
+  functions) plus a live probe with a real JWT: a signed-in *pending* user must
+  get 403 on `PATCH /profiles {role}`, 403 on writing `srs_cards`, and
+  `400 "admin privileges required"` from every `/rpc/admin_*`.
 
-The first two are the obvious candidates for a real test suite; see §12.
+  The live half is not optional. A stale Data API schema cache answers 404 to
+  every RPC, which looks like a refusal but proves nothing — see §8.6.
+
+The first two are the obvious candidates for a real test suite; see §13.
 
 ---
 
-## 12. Open items
+## 13. Open items
 
 Ordered roughly by value per unit of work.
 
@@ -397,9 +508,9 @@ Ordered roughly by value per unit of work.
 2. **Content depth.** N2 has the fewest words (73) and N5 the most (104); the
    upper levels deserve to catch up. Kanji-specific study (readings, compounds)
    is absent entirely.
-3. **Progress export/import.** `storage.js` already has `exportAll()` /
-   `importAll()`; nothing calls them. A JSON download would let a learner move
-   between browsers without a backend.
+3. **Settings sync is one-way.** Level scope, furigana mode and theme are
+   pushed to `profiles` but never pulled back, so a second device starts from
+   defaults. Pulling them needs a rule for which side wins on first sign-in.
 4. **Typing input.** The builder tests word order but not recall of the
    characters themselves. A romaji-to-kana input would close that gap.
 5. **Per-sentence SRS.** The sentence bank is currently sampled at random.
@@ -407,3 +518,10 @@ Ordered roughly by value per unit of work.
 6. **Audio compression.** A full VOICEVOX render is a few hundred WAV files.
    Converting to Opus or AAC before committing would cut it by an order of
    magnitude.
+7. **Admin console is MVP-thin.** It lists accounts, approves, suspends,
+   promotes and resets progress. No audit log of who approved whom (the
+   `approved_by` column is written but never shown), no pagination, no
+   invitations, no password reset flow for a locked-out learner.
+8. **No email verification.** `signUpWithCredential` is called with
+   `noVerificationCallback`, so an address is never proven. Admin approval is
+   the only gate, which is adequate for a closed group and not for open signup.
