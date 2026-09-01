@@ -1,0 +1,7 @@
+# Normalise to LF in the repository; Git checks out native line endings.
+* text=auto eol=lf
+
+# Rendered audio is binary and must never be line-ending converted.
+*.wav binary
+*.mp3 binary
+*.ogg binary

@@ -1,0 +1,45 @@
+{
+  "name": "learn-japan-app",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Open source app for learning Japanese from English, JLPT N5 to N2 — dialogues, grammar, spaced-repetition vocabulary and sentence building.",
+  "keywords": [
+    "japanese",
+    "jlpt",
+    "language-learning",
+    "spaced-repetition",
+    "srs",
+    "furigana",
+    "voicevox",
+    "react",
+    "vite"
+  ],
+  "license": "MIT",
+  "author": "Sumaykud",
+  "homepage": "https://github.com/sumaykud/Learn-Japan-App#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sumaykud/Learn-Japan-App.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sumaykud/Learn-Japan-App/issues"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "audio:manifest": "node scripts/build_audio_manifest.mjs",
+    "deploy": "npm run build && gh-pages -d dist"
+  },
+  "dependencies": {
+    "lucide-react": "^0.383.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "gh-pages": "^6.1.1",
+    "vite": "^5.2.0"
+  }
+}
