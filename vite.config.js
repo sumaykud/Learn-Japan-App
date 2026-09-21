@@ -11,4 +11,16 @@ export default defineConfig({
   // to "/<repo-name>/" and providing the same SPA fallback; the router reads
   // import.meta.env.BASE_URL and adjusts.
   base: "/",
+  // Plain `npm run dev` / `npm run preview` keep their usual ports. A launcher
+  // that hands out ports sets PORT instead, and gets exactly that one:
+  // strictPort makes Vite fail rather than quietly drift to the next free port
+  // and leave the launcher waiting on the wrong one.
+  server: {
+    port: Number(process.env.PORT) || 5173,
+    strictPort: Boolean(process.env.PORT),
+  },
+  preview: {
+    port: Number(process.env.PORT) || 4173,
+    strictPort: Boolean(process.env.PORT),
+  },
 });
