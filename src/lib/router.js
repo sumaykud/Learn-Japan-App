@@ -27,6 +27,9 @@ function toHref(route) {
 export const ROUTES = {
   home: "/",
   admin: "/admin",
+  // One-time superadmin creation. Deliberately not linked from anywhere: the
+  // person who mints a setup code is told the URL alongside it.
+  setup: "/admin/setup",
 };
 
 export function useRoute() {
@@ -52,7 +55,12 @@ export function useRoute() {
     setRoute(toRoute(href));
   }, []);
 
-  return { route, navigate, isAdminRoute: route === ROUTES.admin || route.startsWith(ROUTES.admin + "/") };
+  return {
+    route,
+    navigate,
+    isAdminRoute: route === ROUTES.admin || route.startsWith(ROUTES.admin + "/"),
+    isSetupRoute: route === ROUTES.setup,
+  };
 }
 
 // For anchors, so a middle-click or "open in new tab" still works.

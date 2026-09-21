@@ -1201,9 +1201,24 @@ code {
 }
 
 @media (max-width: 800px) {
+  /* Stacked into one column, the pitch and the form together are taller than
+     a phone screen, so centring would push the sign-in card below the fold.
+     Pin to the top here; the two-column desktop layout stays centred. */
+  .landing {
+    align-items: flex-start;
+  }
+
   .landing-inner {
     grid-template-columns: 1fr;
     gap: 34px;
+  }
+
+  /* One column stacks the pitch above the form, so signing in means scrolling
+     past the whole sales pitch first — wrong priority for someone who already
+     has an account. Reorder visually only: the DOM keeps the pitch first,
+     which is the right reading order for a screen reader and for search. */
+  .landing-form {
+    order: -1;
   }
 
   .landing-mark {
@@ -1375,6 +1390,35 @@ code {
   padding: 5px 10px;
   font-size: 12.5px;
   gap: 5px;
+}
+
+/* Three roles do not fit a toggle button, so the row carries a select. Styled
+   to sit level with .tiny-btn beside it rather than as a form field. */
+.role-select {
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.role-select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* The one irreversible action in the row. Coloured so it never reads as a
+   sibling of the recoverable buttons next to it. */
+.btn.danger-btn {
+  color: var(--vermillion);
+}
+
+.btn.danger-btn:hover:not(:disabled) {
+  border-color: var(--vermillion);
+  background: var(--vermillion-soft);
 }
 
 /* ---------- admin login ---------- */

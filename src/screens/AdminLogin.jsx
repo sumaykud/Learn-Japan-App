@@ -4,8 +4,8 @@ import { useAuth } from "../lib/auth/AuthContext.jsx";
 import { ROUTES, href } from "../lib/router.js";
 
 // The administrator entrance. Deliberately has no "create account" tab:
-// administrators are made by another administrator or by the allowlist, never
-// by signing up here.
+// administrators are appointed by a superadmin, and the very first superadmin
+// is made once through /admin/setup with a code minted in the database.
 //
 // Worth being clear that this page is convenience, not security. Anyone may
 // open /admin; what stops them is that admin_list_accounts() refuses a caller

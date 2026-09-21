@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Ban, Check, LogOut, RefreshCw, Search, ShieldCheck, ShieldOff, Trash2, TriangleAlert, Undo2, Users,
+  Ban, Check, LogOut, RefreshCw, RotateCcw, Search, ShieldCheck, ShieldPlus, Trash2, TriangleAlert, Undo2,
+  UserX, Users,
 } from "lucide-react";
 import { useAuth } from "../lib/auth/AuthContext.jsx";
 import {
-  adminListAccounts, adminResetProgress, adminSetRole, adminSetStatus, adminStats,
+  adminDeleteAccount, adminListAccounts, adminResetProgress, adminSetRole, adminSetStatus, adminStats,
 } from "../lib/sync/account.js";
+import {
+  ROLE, ROLE_LABEL, assignableRoles, canDeleteAccounts, canResetProgress, isSuperadmin,
+} from "../lib/auth/roles.js";
 import { Stat } from "../components/ui.jsx";
 
 const STATUS_TONE = {
@@ -13,6 +17,25 @@ const STATUS_TONE = {
   approved: { bg: "var(--green-soft)", fg: "var(--green)", label: "Approved" },
   suspended: { bg: "var(--line-soft)", fg: "var(--muted)", label: "Suspended" },
 };
+
+function RoleBadge({ role }) {
+  if (role === ROLE.superadmin) {
+    return (
+      <>
+        <ShieldPlus size={11} style={{ verticalAlign: -1, color: "var(--vermillion)" }} />{" "}
+        {ROLE_LABEL.superadmin}
+      </>
+    );
+  }
+  if (role === ROLE.admin) {
+    return (
+      <>
+        <ShieldCheck size={11} style={{ verticalAlign: -1 }} /> {ROLE_LABEL.admin}
+      </>
+    );
+  }
+  return <>{ROLE_LABEL[role] || role}</>;
+}
 
 function when(ts) {
   if (!ts) return "—";
@@ -23,8 +46,14 @@ function when(ts) {
 // The admin console is deliberately not part of the learner shell: an admin
 // account has no study data and no reason to see the tabs. This is the entire
 // surface for that role.
-export default function AdminConsole() {
+//
+// `profile` is the viewer's own row. It decides which controls are offered —
+// an ordinary admin is not shown the superadmin actions the server would
+// refuse anyway. Hiding them is courtesy; admin_set_role() is the guard.
+export default function AdminConsole({ profile }) {
   const { user, getToken, signOut } = useAuth();
+  const viewerRole = profile?.role;
+  const viewerIsSuper = isSuperadmin(viewerRole);
   const [rows, setRows] = useState([]);
   const [stats, setStats] = useState(null);
   const [state, setState] = useState("loading");
@@ -116,6 +145,7 @@ export default function AdminConsole() {
           <Stat n={stats?.pending ?? "—"} label="Awaiting approval" tone={pending ? "var(--vermillion)" : undefined} />
           <Stat n={stats?.approved ?? "—"} label="Approved" tone="var(--green)" />
           <Stat n={stats?.admins ?? "—"} label="Administrators" />
+          <Stat n={stats?.superadmins ?? "—"} label="Superadmins" tone="var(--vermillion)" />
           <Stat n={stats?.cards ?? "—"} label="Cards in review" />
         </div>
 
@@ -164,6 +194,12 @@ export default function AdminConsole() {
                   const tone = STATUS_TONE[r.status] || STATUS_TONE.pending;
                   const self = r.user_id === user?.id;
                   const busy = busyId === r.user_id;
+                  // A superadmin row is untouchable for an ordinary admin —
+                  // role, status and progress alike. admin_set_role(),
+                  // admin_set_status() and admin_reset_progress() each raise
+                  // for this case; the row goes read-only so nobody clicks a
+                  // button whose only outcome is an error banner.
+                  const locked = !viewerIsSuper && r.role === ROLE.superadmin;
                   return (
                     <tr key={r.user_id}>
                       <td>
@@ -172,8 +208,7 @@ export default function AdminConsole() {
                           <span>
                             <span className="acct-email">{r.email || r.user_id}</span>
                             <span className="acct-role">
-                              {r.role === "admin" && <ShieldCheck size={11} style={{ verticalAlign: -1 }} />}{" "}
-                              {r.role}
+                              <RoleBadge role={r.role} />
                               {self && " · you"}
                             </span>
                           </span>
@@ -192,6 +227,10 @@ export default function AdminConsole() {
                           // The server refuses these for your own row anyway;
                           // hiding them keeps the reason obvious.
                           <span className="sub">—</span>
+                        ) : locked ? (
+                          <span className="sub" title="Only a superadmin can change a superadmin account">
+                            Locked
+                          </span>
                         ) : (
                           <div className="row-actions">
                             {r.status !== "approved" && (
@@ -212,31 +251,90 @@ export default function AdminConsole() {
                                 <Ban size={13} /> Suspend
                               </button>
                             )}
-                            <button
-                              className="btn tiny-btn"
-                              disabled={busy}
-                              title={r.role === "admin" ? "Demote to learner" : "Promote to administrator"}
-                              onClick={() =>
-                                act(
-                                  r.user_id,
-                                  () => adminSetRole(getToken, r.user_id, r.role === "admin" ? "user" : "admin"),
-                                  `${r.email} is now ${r.role === "admin" ? "a learner" : "an administrator"}.`
-                                )
+                            {(() => {
+                              // Three roles make a toggle meaningless, so the
+                              // row offers exactly the moves this viewer is
+                              // allowed to make. An ordinary admin looking at
+                              // a superadmin gets an empty list and a reason.
+                              const options = assignableRoles(viewerRole, r.role);
+                              if (options.length === 0) {
+                                return (
+                                  <span className="sub" title="Only a superadmin can change a superadmin account">
+                                    locked
+                                  </span>
+                                );
                               }
-                            >
-                              {r.role === "admin" ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
-                            </button>
-                            <button
-                              className="btn tiny-btn"
-                              disabled={busy}
-                              title="Erase this learner's progress"
-                              onClick={() => {
-                                if (window.confirm(`Erase all study progress for ${r.email}? The account stays.`))
-                                  act(r.user_id, () => adminResetProgress(getToken, r.user_id), `Progress cleared for ${r.email}.`);
-                              }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                              return (
+                                <select
+                                  className="role-select"
+                                  value={r.role}
+                                  disabled={busy}
+                                  title="Change role"
+                                  onChange={(e) => {
+                                    const next = e.target.value;
+                                    if (next === r.role) return;
+                                    if (
+                                      next === ROLE.superadmin &&
+                                      !window.confirm(
+                                        `Make ${r.email} a superadmin? They will be able to appoint other superadmins and reset every account's progress.`
+                                      )
+                                    )
+                                      return;
+                                    act(
+                                      r.user_id,
+                                      () => adminSetRole(getToken, r.user_id, next),
+                                      `${r.email} is now ${ROLE_LABEL[next].toLowerCase()}.`
+                                    );
+                                  }}
+                                >
+                                  {options.map((role) => (
+                                    <option key={role} value={role}>
+                                      {ROLE_LABEL[role]}
+                                    </option>
+                                  ))}
+                                </select>
+                              );
+                            })()}
+                            {canResetProgress(viewerRole) && (
+                              <button
+                                className="btn tiny-btn"
+                                disabled={busy}
+                                title="Reset this learner's progress"
+                                onClick={() => {
+                                  if (window.confirm(`Reset all study progress for ${r.email}? The account stays.`))
+                                    act(r.user_id, () => adminResetProgress(getToken, r.user_id), `Progress reset for ${r.email}.`);
+                                }}
+                              >
+                                <RotateCcw size={13} />
+                              </button>
+                            )}
+                            {canDeleteAccounts(viewerRole) && (
+                              <button
+                                className="btn tiny-btn danger-btn"
+                                disabled={busy}
+                                title="Delete this account"
+                                onClick={() => {
+                                  // Irreversible, so a click-through confirm is
+                                  // not enough: typing the address proves the
+                                  // right row was meant, not merely the button.
+                                  const expected = r.email || r.user_id;
+                                  const typed = window.prompt(
+                                    `Permanently delete ${expected}?\n\n` +
+                                      "Their study history is erased and they can no longer use this app. " +
+                                      "This cannot be undone.\n\n" +
+                                      "Type the email address to confirm:"
+                                  );
+                                  if (typed === null) return;
+                                  if (typed.trim().toLowerCase() !== expected.toLowerCase()) {
+                                    setError("The address did not match, so nothing was deleted.");
+                                    return;
+                                  }
+                                  act(r.user_id, () => adminDeleteAccount(getToken, r.user_id), `Deleted ${expected}.`);
+                                }}
+                              >
+                                <UserX size={13} />
+                              </button>
+                            )}
                           </div>
                         )}
                       </td>
@@ -248,6 +346,9 @@ export default function AdminConsole() {
           </div>
         )}
 
+        {/* Reserved for the top tier. admin_reset_progress(null) raises for an
+            ordinary admin, so showing the button would only produce an error. */}
+        {canResetProgress(viewerRole) && (
         <div style={{ marginTop: 34 }}>
           <div className="section-head">
             <div>
@@ -286,6 +387,7 @@ export default function AdminConsole() {
             </button>
           )}
         </div>
+        )}
       </main>
     </div>
   );
