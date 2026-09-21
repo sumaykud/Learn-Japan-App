@@ -8,12 +8,16 @@ const RETRIES = [350, 900, 1800];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ensure_profile() raises exactly this for a tombstoned account — see
+// db/migrations/004_account_deletion.sql. Change both together.
+const isDeletedError = (err) => /account deleted/i.test(err?.message || "");
+
 // The learner's server-side profile: role and approval status. Held separately
 // from AuthContext because identity (who you are) and authorisation (what you
 // may do here) come from different systems — Stack Auth and Postgres.
 export function useProfile(status, getToken) {
   const [profile, setProfile] = useState(null);
-  const [state, setState] = useState("idle"); // idle | loading | ready | error
+  const [state, setState] = useState("idle"); // idle | loading | ready | error | deleted
   const [error, setError] = useState(null);
 
   const reload = useCallback(async () => {
@@ -52,6 +56,14 @@ export function useProfile(status, getToken) {
         setState("ready");
         return;
       } catch (err) {
+        // A deleted account is a verdict, not a race. Retrying cannot change
+        // it and would only delay the screen that explains what happened.
+        if (isDeletedError(err)) {
+          setProfile(null);
+          setError(null);
+          setState("deleted");
+          return;
+        }
         lastError = err;
         if (attempt < RETRIES.length) await sleep(RETRIES[attempt]);
       }

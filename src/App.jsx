@@ -7,6 +7,7 @@ import { useProgress, usePersistentState } from "./lib/useProgress.js";
 import { GUEST_SCOPE, exportScope, hasProgress, userScope } from "./lib/storage.js";
 import { useAuth } from "./lib/auth/AuthContext.jsx";
 import { useProfile } from "./lib/auth/useProfile.js";
+import { canAdminister } from "./lib/auth/roles.js";
 import { syncConfigured } from "./lib/sync/dataApi.js";
 import { saveSettings } from "./lib/sync/sync.js";
 import { stop } from "./lib/audio.js";
@@ -25,6 +26,7 @@ import LandingPage from "./screens/LandingPage.jsx";
 import GateScreen from "./screens/GateScreen.jsx";
 import AdminConsole from "./screens/AdminConsole.jsx";
 import AdminLogin from "./screens/AdminLogin.jsx";
+import SetupScreen from "./screens/SetupScreen.jsx";
 
 const TABS = [
   { id: "today", label: "Today", icon: Home },
@@ -39,7 +41,7 @@ const TABS = [
 export default function App() {
   const { status, user, getToken, configured } = useAuth();
   const { profile, state: profileState, error: profileError, reload: reloadProfile } = useProfile(status, getToken);
-  const { navigate, isAdminRoute } = useRoute();
+  const { navigate, isAdminRoute, isSetupRoute } = useRoute();
   const [tab, setTab] = useState("today");
 
   // One scope per learner. Signing in or out swaps every persisted key, so two
@@ -85,7 +87,7 @@ export default function App() {
   // into the same redirect.
   useEffect(() => {
     if (!configured || isAdminRoute) return;
-    if (profile?.role === "admin" && profile.status === "approved") {
+    if (canAdminister(profile?.role) && profile.status === "approved") {
       navigate(ROUTES.admin, { replace: true });
     }
   }, [configured, isAdminRoute, profile, navigate]);
@@ -108,9 +110,10 @@ export default function App() {
 
   // ---- routing and access gates -------------------------------------------
   //
-  // Two entrances:
-  //   /       the learning site — landing page, then the learner dashboard
-  //   /admin  the administration entrance — its own sign-in, then the console
+  // Two entrances, plus a one-time door:
+  //   /             the learning site — landing page, then the learner dashboard
+  //   /admin        the administration entrance — its own sign-in, then the console
+  //   /admin/setup  creates the first superadmin with a setup code, then closes
   //
   // Every hook above runs unconditionally; the code below only chooses what to
   // render. Order matters: identity first, then authorisation, then role.
@@ -127,20 +130,28 @@ export default function App() {
     if (status === "loading") return <Splash label="Checking your session…" />;
 
     if (status !== "signed-in") {
+      if (isSetupRoute) return <SetupScreen navigate={navigate} onClaimed={reloadProfile} />;
       return isAdminRoute ? <AdminLogin navigate={navigate} /> : <LandingPage />;
     }
 
     if (profileState === "loading" || profileState === "idle") return <Splash label="Loading your account…" />;
+    // Before the error branch: a deleted account also has no profile, and it
+    // must read as a final verdict rather than a failure to load.
+    if (profileState === "deleted") return <GateScreen variant="deleted" />;
     if (profileState === "error" || !profile)
       return <GateScreen variant="error" detail={profileError} onRetry={reloadProfile} />;
+    // The one-time setup page has to reach an account created seconds ago,
+    // which is still pending. So it comes after the gates that mean "no profile
+    // to claim with" and before pending/suspended, which would hide it.
+    if (isSetupRoute) return <SetupScreen navigate={navigate} onClaimed={reloadProfile} />;
     if (profile.status === "suspended") return <GateScreen variant="suspended" onRetry={reloadProfile} />;
     if (profile.status !== "approved") return <GateScreen variant="pending" onRetry={reloadProfile} />;
 
-    if (profile.role === "admin") {
+    if (canAdminister(profile.role)) {
       // An administrator manages accounts and nothing else — no tabs, no cards.
       // Landing on / has nothing to show them, so send them where they belong.
       if (!isAdminRoute) return <Splash label="Opening administration…" />;
-      return <AdminConsole />;
+      return <AdminConsole profile={profile} />;
     }
 
     // A learner who wandered into /admin. Say so plainly and point them home

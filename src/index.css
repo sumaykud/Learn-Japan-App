@@ -1392,6 +1392,35 @@ code {
   gap: 5px;
 }
 
+/* Three roles do not fit a toggle button, so the row carries a select. Styled
+   to sit level with .tiny-btn beside it rather than as a form field. */
+.role-select {
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.role-select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* The one irreversible action in the row. Coloured so it never reads as a
+   sibling of the recoverable buttons next to it. */
+.btn.danger-btn {
+  color: var(--vermillion);
+}
+
+.btn.danger-btn:hover:not(:disabled) {
+  border-color: var(--vermillion);
+  background: var(--vermillion-soft);
+}
+
 /* ---------- admin login ---------- */
 
 .admin-login .auth-card {

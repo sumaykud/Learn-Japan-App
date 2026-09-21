@@ -363,20 +363,32 @@ Two mechanisms, deliberately layered:
    *underneath* RLS: no policy can hand back what the grant withholds, so a
    future careless policy cannot reopen this.
 2. **SECURITY DEFINER functions.** Every privileged action is an RPC that
-   re-checks `is_admin()` in its own body, with a pinned `search_path`.
+   re-checks a tier — `is_admin()` or `is_superadmin()` — in its own body, with
+   a pinned `search_path`.
 
 ```
-ensure_profile()                    creates the profile; the SERVER picks role/status
-admin_list_accounts()               all accounts + per-account study counts
-admin_set_status(user, status)      approve / suspend
-admin_set_role(user, role)          promote / demote
-admin_reset_progress(user | null)   wipe one learner, or everyone
-admin_stats()                       counts for the console
+ensure_profile()                    creates the profile as a pending learner; refuses deleted accounts
+admin_list_accounts()               admin      all accounts + per-account study counts
+admin_stats()                       admin      counts for the console
+admin_set_status(user, status)      admin      approve / suspend (superadmin rows: superadmin only)
+admin_set_role(user, role)          admin      user <-> admin; granting/revoking superadmin: superadmin only
+admin_reset_progress(user | null)   superadmin wipe one learner, or everyone
+admin_delete_account(user)          superadmin erase an account and tombstone it
+superadmin_setup_available()        signed in  true while no superadmin exists
+claim_superadmin(code)              signed in  one-time: become the first superadmin
+create_superadmin_setup_code()      database owner only — never reachable from the browser
 ```
 
-A SECURITY DEFINER function runs as the table owner. **Omitting the `is_admin()`
-check in any one of them hands the whole table to every signed-in user** —
+A SECURITY DEFINER function runs as the table owner. **Omitting the tier check
+in any one of them hands the whole table to every signed-in user** —
 `db/checks.sql` check 7 exists to catch exactly that.
+
+**A new function is callable through two grants.** Postgres gives EXECUTE to
+`PUBLIC` on CREATE FUNCTION, and Neon's Data API provisioning added default
+privileges granting EXECUTE on new functions in `public` to `authenticated`.
+An internal function is private only once revoked from `public`,
+`authenticated` *and* `anonymous` together; check 12 tests the result with
+`has_function_privilege()` rather than trusting the revoke.
 
 Both admin mutators refuse when `target_user = auth.user_id()`. An admin who
 suspended or demoted themselves would leave nobody able to undo it.
@@ -391,20 +403,41 @@ status = pending ────────────────────►
      │ admin approves                    (no study data reachable: RLS refuses)
      ▼
 status = approved, role = user ──────► the learner app
-status = approved, role = admin ─────► the admin console, and nothing else
+status = approved, role = admin ─────► the admin console: moderation only
+status = approved, role = superadmin ► the admin console: everything, incl. deletion
 status = suspended ──────────────────► "account suspended" (history retained)
+tombstoned (deleted) ────────────────► "account deleted" (nothing retained, final)
 ```
 
-An admin has no learner UI by design: the role exists to administer accounts,
-not to study. Study tables are gated on `is_approved()`, so a pending account
-cannot write a single card even by calling the API directly.
+Administrators have no learner UI by design: the roles exist to administer
+accounts, not to study. Study tables are gated on `is_approved()`, so a pending
+account cannot write a single card even by calling the API directly.
 
-### 8.5 Bootstrapping the first admin
+Deletion erases the Postgres half of an account and records a tombstone that
+`ensure_profile()` checks, so the next sign-in is refused rather than silently
+recreating a fresh learner. The Stack Auth identity survives — removing it needs
+a secret server key, and there is no server to hold one.
 
-`public.admin_allowlist` holds emails that become approved admins on first
-sign-in. Without it a fresh deployment would have every account pending and
-nobody able to approve anything. The table has no grants to `authenticated`,
-so it is invisible and unwritable from the browser.
+### 8.5 Bootstrapping the first superadmin
+
+A fresh deployment has no administrators, so every account would sit pending
+with nobody able to approve it. The first superadmin is made **once**, with a
+setup code:
+
+1. The database owner runs `select public.create_superadmin_setup_code();`.
+   It returns a 122-bit code valid for 24 hours and stores only its SHA-256.
+2. They open `/admin/setup`, create or sign in to an account, and enter it.
+3. `claim_superadmin()` promotes that account and deletes the code.
+
+Minting and claiming both refuse while any approved superadmin exists, so the
+door closes behind the first claim. The minting function is revoked from every
+role the Data API uses: being able to call it at all is the proof of ownership.
+
+This replaced an email allowlist (002–004). That design trusted an address, and
+this project's Stack Auth does not verify email ownership before sign-in —
+with the owner's address committed to the public repository, anyone could have
+signed up as it first. It also silently failed if `neon_auth.users_sync` had not
+caught up when the profile was created.
 
 ### 8.6 Operational trap: the schema cache
 
@@ -427,14 +460,19 @@ about your access rules. Re-run the checks after reloading, and only trust a
 
 ### 9.1 Routes
 
-Two entrances, resolved in `src/lib/router.js` — about forty lines of
-`history.pushState` and a `popstate` listener. A router library would be more
-code than the two routes it served.
+Two entrances and a one-time door, resolved in `src/lib/router.js` — about
+forty lines of `history.pushState` and a `popstate` listener. A router library
+would be more code than the routes it served.
 
-| Route | Signed out | Pending / suspended | Learner | Admin |
+| Route | Signed out | Pending / suspended | Learner | Admin / superadmin |
 | --- | --- | --- | --- | --- |
 | `/` | `LandingPage` | `GateScreen` | learner shell | redirect → `/admin` |
 | `/admin` | `AdminLogin` | `GateScreen` | `GateScreen` no-access | `AdminConsole` |
+| `/admin/setup` | `SetupScreen` step 1 | `SetupScreen` step 2 | `SetupScreen` step 2 | `SetupScreen` "complete" |
+
+`/admin/setup` is resolved *before* the pending and suspended gates, because
+its whole job is to reach an account created moments earlier, which is still
+pending. It is not linked from any page.
 
 Resolution order in `App` is identity → authorisation → role → route. Getting
 that order wrong cannot leak data, because the database refuses the admin RPCs

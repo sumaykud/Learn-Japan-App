@@ -112,14 +112,19 @@ bundle you can host anywhere.
    ```bash
    psql "$DATABASE_URL" -f db/migrations/002_roles_and_approval.sql
    ```
-3. Put your own email in `public.admin_allowlist` so your account becomes the
-   first administrator when you sign up:
-   ```sql
-   insert into public.admin_allowlist (email) values ('you@example.com');
+   ```bash
+   psql "$DATABASE_URL" -f db/migrations/003_superadmin.sql
    ```
-4. Copy `.env.example` to `.env` and fill in the three values.
-5. **Reload the Data API schema cache** — see the warning below.
-6. `npm run dev`
+   ```bash
+   psql "$DATABASE_URL" -f db/migrations/004_account_deletion.sql
+   ```
+   ```bash
+   psql "$DATABASE_URL" -f db/migrations/005_superadmin_setup.sql
+   ```
+3. Copy `.env.example` to `.env` and fill in the three values.
+4. **Reload the Data API schema cache** — see the warning below.
+5. `npm run dev`
+6. Create the first superadmin — see [One-time superadmin setup](#one-time-superadmin-setup).
 
 > **The one thing that will trip you up.** Neon's Data API caches the Postgres
 > schema and does *not* pick up new functions on its own. Until you reload it,
@@ -131,28 +136,80 @@ bundle you can host anywhere.
 
 ### Two entrances
 
-| URL | Signed out | Learner | Administrator |
+| URL | Signed out | Learner (`user`) | Admin or superadmin |
 | --- | --- | --- | --- |
 | `/` | Landing page with sign in / create account | The learning dashboard | Redirected to `/admin` |
 | `/admin` | Administrator sign-in | "Not an administrator" | The admin console |
+| `/admin/setup` | Step 1: create an account | Step 2: enter the setup code — or "already complete" | "Already complete" |
 
-An administrator has no learner interface, so `/` has nothing to show them and
-sends them on. A learner who opens `/admin` is told plainly rather than silently
-bounced, which would look like a broken link.
+Both administrator tiers share `/admin`; what differs is which controls the
+console offers them. An administrator has no learner interface, so `/` has
+nothing to show them and sends them on. A learner who opens `/admin` is told
+plainly rather than silently bounced, which would look like a broken link.
 
 **The URL protects nothing.** Anyone may open `/admin`; what stops them is that
 the admin functions refuse a caller who is not an admin. The split exists so the
 two audiences get the right front door, not as a security boundary.
 
-### What the administrator can do
+### One-time superadmin setup
 
-An admin account has **no learning interface at all** — the role exists to
-manage accounts, not to study. The console lists every account with its status
-and study volume, and can approve, suspend, promote, demote, wipe one learner's
-progress, or wipe everyone's.
+A fresh deployment has no administrators at all, so the first superadmin is
+made once, by whoever controls the database:
 
-Admins cannot change their own role or status. Locking yourself out would leave
-nobody able to unlock you, so the database refuses it.
+1. In the Neon SQL editor (or psql), mint a code:
+   ```sql
+   select public.create_superadmin_setup_code();
+   ```
+   It returns something like `3F9A1C0E-7B24D6A1-4E8F0B3C-92D5A7E1`, valid for
+   24 hours. Only its hash is stored. Minting again revokes the previous one.
+2. Open **`/admin/setup`** on the site, create an account (or sign in to one),
+   and enter the code.
+3. That account becomes an approved superadmin and the code stops working.
+
+After that the door is closed: both minting and claiming refuse while any
+superadmin exists, and further administrators are appointed in the console.
+`/admin/setup` is not linked from anywhere, and knowing the URL is worthless
+without a code.
+
+**Why a code and not an email allowlist.** Earlier versions promoted whichever
+account signed up with the owner's address. This project's Stack Auth does not
+verify email ownership before sign-in, so anyone who knew the address — and it
+was committed to this public repository — could have signed up as it first. A
+code proves the one thing that matters: that you can run SQL on the database.
+
+### What each role can do
+
+Administrator accounts have **no learning interface at all** — the roles exist
+to manage accounts, not to study. The console lists every account with its
+status and study volume.
+
+| | Admin | Superadmin |
+| --- | :---: | :---: |
+| Approve and suspend learners | ✓ | ✓ |
+| Move accounts between learner and admin | ✓ | ✓ |
+| Appoint or remove superadmins | | ✓ |
+| Change anything about a superadmin account | | ✓ |
+| Reset one learner's progress | | ✓ |
+| Reset every account's progress | | ✓ |
+| Delete an account | | ✓ |
+
+An ordinary admin moderates; nothing an admin can do destroys data. Every
+destructive operation belongs to the superadmin, and the database enforces each
+row of that table itself — the console only hides buttons that would fail.
+
+Nobody can change their own role or status, or delete themselves. The last
+remaining superadmin cannot be demoted, suspended or deleted either, so the
+tier can never empty itself from inside the app. (If it were ever emptied by
+hand in SQL, the one-time setup opens again — still requiring database access.)
+
+**What "delete" removes.** Deleting an account erases every row this app holds
+about the person — profile, cards, review history — and records a tombstone so
+their next sign-in is refused instead of silently recreating them. Their
+**Stack Auth login is not removed**: that needs Stack's secret server key, and a
+static site with no server of its own has nowhere safe to keep one. So they can
+still authenticate, see "Account deleted", and do nothing else; and the same
+email cannot sign up again. To remove the login too, delete the user in the
+Neon console under Auth → Users.
 
 ### Verifying the access rules
 
@@ -162,13 +219,24 @@ The security model lives in Postgres, so it can be checked there:
 psql "$DATABASE_URL" -f db/checks.sql
 ```
 
-Seven assertions covering grants, RLS and the admin functions; all should say
-PASS. That does **not** cover the live API, so also confirm with a real token
+Twenty assertions covering grants, RLS, both administrator tiers, account
+deletion and the one-time setup; all should say PASS. Function privileges are
+checked with `has_function_privilege()`, because a new function here is callable
+through two grants at once — Postgres gives EXECUTE to `PUBLIC`, and Neon's
+default privileges give it to `authenticated` — and revoking one leaves the
+other. That does **not** cover the live API, so also confirm with a real token
 that a signed-in *pending* user gets:
 
 - `403` on `PATCH /profiles` with `{"role":"admin"}` — no self-promotion
 - `403` on writing `srs_cards` — no studying before approval
-- `400 "admin privileges required"` from every `/rpc/admin_*`
+- `400 "admin privileges required"` from `/rpc/admin_list_accounts`,
+  `admin_stats`, `admin_set_role` and `admin_set_status`
+- `400 "superadmin privileges required"` from `/rpc/admin_delete_account` and
+  `admin_reset_progress` — and the same from an ordinary *admin's* token
+- `400 "invalid or expired setup code"` from `/rpc/claim_superadmin` with a
+  made-up code, and `400 "setup already completed"` once a superadmin exists
+- a refusal from `/rpc/create_superadmin_setup_code` — minting is for the
+  database owner only
 
 A `404` from an `/rpc/` endpoint means a stale schema cache, not a refusal.
 Reload it and test again before believing the rules hold.

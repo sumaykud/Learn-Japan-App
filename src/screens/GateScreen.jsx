@@ -1,9 +1,9 @@
 import React from "react";
-import { Clock, LogOut, RefreshCw, Ban, TriangleAlert } from "lucide-react";
+import { Clock, LogOut, RefreshCw, Ban, TriangleAlert, UserX } from "lucide-react";
 import { useAuth } from "../lib/auth/AuthContext.jsx";
 
 // Shown when a learner is signed in but not allowed to study: waiting for
-// approval, suspended, or the profile lookup itself failed.
+// approval, suspended, deleted, or the profile lookup itself failed.
 const VARIANTS = {
   pending: {
     icon: Clock,
@@ -22,6 +22,16 @@ const VARIANTS = {
     tone: "var(--muted)",
     title: "Not an administrator",
     body: "This account is a learner, so the administration area is not available to it. Your study dashboard is where you left it.",
+  },
+  deleted: {
+    icon: UserX,
+    tone: "var(--vermillion)",
+    title: "Account deleted",
+    // Unlike suspension this does not come back, and the study history is
+    // already gone, so the copy must not suggest either.
+    body: "An administrator has deleted this account and its study history. It cannot be restored.",
+    // Nothing to check again: deletion is final. Only signing out is offered.
+    final: true,
   },
   error: {
     icon: TriangleAlert,
@@ -56,7 +66,7 @@ export default function GateScreen({ variant = "pending", detail, onRetry, prima
         {detail && <p className="form-error" style={{ justifyContent: "center" }}>{detail}</p>}
 
         <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
-          {primary ? (
+          {v.final ? null : primary ? (
             <button className="btn primary" onClick={primary.onClick}>
               {primary.label}
             </button>
