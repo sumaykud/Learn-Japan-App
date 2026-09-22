@@ -9,6 +9,9 @@ const base = import.meta.env.BASE_URL || "/";
 const missing = new Set();
 let current = null;
 
+// Shared so every "play slowly" control in the app uses the same speed.
+export const SLOW_RATE = 0.6;
+
 export function stop() {
   if (current) {
     current.onended = null;

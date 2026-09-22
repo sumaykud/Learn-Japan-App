@@ -1,7 +1,7 @@
 import React from "react";
-import { Volume2 } from "lucide-react";
+import { Volume2, Turtle } from "lucide-react";
 import { segments, stripFurigana, toKana } from "../lib/furigana.js";
-import { speak } from "../lib/audio.js";
+import { speak, SLOW_RATE } from "../lib/audio.js";
 
 // Renders authored text like "食[た]べる" as real <ruby>, so the reading sits
 // above the kanji instead of interrupting the sentence. mode "off" hides the
@@ -30,17 +30,30 @@ export function Furigana({ text, mode = "on" }) {
 
 export function SpeakButton({ text, size = 14, label = "Play audio" }) {
   return (
-    <button
-      className="speak"
-      aria-label={label}
-      title={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        speak(text);
-      }}
-    >
-      <Volume2 size={size} />
-    </button>
+    <span className="speak-group">
+      <button
+        className="speak"
+        aria-label={label}
+        title={label}
+        onClick={(e) => {
+          e.stopPropagation();
+          speak(text);
+        }}
+      >
+        <Volume2 size={size} />
+      </button>
+      <button
+        className="speak speak-slow"
+        aria-label="Play slowly"
+        title="Play slowly"
+        onClick={(e) => {
+          e.stopPropagation();
+          speak(text, { rate: SLOW_RATE });
+        }}
+      >
+        <Turtle size={size} />
+      </button>
+    </span>
   );
 }
 

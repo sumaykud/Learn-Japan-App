@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from "react";
-import { RotateCcw, Volume2 } from "lucide-react";
+import { RotateCcw, Volume2, Turtle } from "lucide-react";
 import { byLevel, grammar, vocab } from "../data/index.js";
 import { sample, shuffle } from "../lib/util.js";
 import { Furigana, SpeakButton } from "../components/Japanese.jsx";
 import { Empty, ProgressLine, SectionHead, Toggle } from "../components/ui.jsx";
-import { speak } from "../lib/audio.js";
+import { speak, SLOW_RATE } from "../lib/audio.js";
 
 const ROUND = 10;
 
@@ -120,9 +120,14 @@ export default function QuizScreen({ levels, furi, record }) {
       return (
         <>
           <p className="sub" style={{ margin: "0 0 12px" }}>Listen, then pick what you heard</p>
-          <button className="btn" onClick={() => speak(q.answer.jp)}>
-            <Volume2 size={16} /> Play again
-          </button>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+            <button className="btn" onClick={() => speak(q.answer.jp)}>
+              <Volume2 size={16} /> Play again
+            </button>
+            <button className="btn" onClick={() => speak(q.answer.jp, { rate: SLOW_RATE })}>
+              <Turtle size={16} /> Play slowly
+            </button>
+          </div>
         </>
       );
     return (

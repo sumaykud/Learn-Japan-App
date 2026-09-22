@@ -217,6 +217,13 @@ a:focus-visible,
   background: var(--surface-2);
 }
 
+.speak-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 .speak {
   background: transparent;
   border: none;
@@ -231,6 +238,10 @@ a:focus-visible,
 
 .speak:hover {
   opacity: 1;
+}
+
+.speak-slow {
+  color: var(--indigo);
 }
 
 .chips {
